@@ -11,7 +11,7 @@ package sqlite3
 /*
 #cgo CFLAGS: -std=gnu99
 #cgo CFLAGS: -maes
-#cgo CFLAGS: -std=gnu99
+#cgo CFLAGS: -msse4.2
 #cgo CFLAGS: -DSQLITE_ENABLE_RTREE
 #cgo CFLAGS: -DSQLITE_THREADSAFE=1
 #cgo CFLAGS: -DHAVE_USLEEP=1
