@@ -10,6 +10,8 @@ package sqlite3
 
 /*
 #cgo CFLAGS: -std=gnu99
+#cgo CFLAGS: -maes
+#cgo CFLAGS: -std=gnu99
 #cgo CFLAGS: -DSQLITE_ENABLE_RTREE
 #cgo CFLAGS: -DSQLITE_THREADSAFE=1
 #cgo CFLAGS: -DHAVE_USLEEP=1
@@ -187,6 +189,12 @@ static int sqlite3_system_errno(sqlite3 *db) {
   return 0;
 }
 #endif
+
+static
+void sqlite3_enable_aes128(sqlite3* db)
+{
+	sqlite3mc_config(db, "cipher", CODEC_TYPE_AES128);
+}
 */
 import "C"
 import (
@@ -2178,6 +2186,26 @@ func (rc *SQLiteRows) nextSyncLocked(dest []driver.Value) error {
 				dest[i] = s
 			}
 		}
+	}
+	return nil
+}
+
+func ResetKey(filename, key string) error {
+	var db *C.sqlite3
+	cFilename := C.CString(filename)
+	defer C.free(unsafe.Pointer(cFilename))
+	if rv := C.sqlite3_open(cFilename, &db); rv != 0 {
+		return fmt.Errorf("failed to open database (err:%v)", rv)
+	}
+	defer C.sqlite3_close(db)
+	C.sqlite3_enable_aes128(db)
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	if rv := C.sqlite3_key(db, unsafe.Pointer(cKey), C.int(len(key))); rv != 0 {
+		return fmt.Errorf("failed to set key (err:%v)", rv)
+	}
+	if rv := C.sqlite3_rekey(db, C.NULL, 0); rv != 0 {
+		return fmt.Errorf("failed to clear key (err:%v)", rv)
 	}
 	return nil
 }

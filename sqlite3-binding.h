@@ -1,4 +1,17 @@
-#ifndef USE_LIBSQLITE3
+/*
+** Name:        sqlite3mc.h
+** Purpose:     Header file for SQLite3 Multiple Ciphers support
+** Author:      Ulrich Telle
+** Created:     2020-03-01
+** Copyright:   (c) 2019-2020 Ulrich Telle
+** License:     MIT
+*/
+
+#ifndef SQLITE3MC_H_
+#define SQLITE3MC_H_
+
+/* #include "sqlite3.h" */
+/*** Begin of #include "sqlite3.h" ***/
 /*
 ** 2001-09-15
 **
@@ -124,9 +137,9 @@ extern "C" {
 ** [sqlite3_libversion_number()], [sqlite3_sourceid()],
 ** [sqlite_version()] and [sqlite_source_id()].
 */
-#define SQLITE_VERSION        "3.34.0"
-#define SQLITE_VERSION_NUMBER 3034000
-#define SQLITE_SOURCE_ID      "2020-12-01 16:14:00 a26b6597e3ae272231b96f9982c3bcc17ddec2f2b6eb4df06a224b91089fed5b"
+#define SQLITE_VERSION        "3.35.2"
+#define SQLITE_VERSION_NUMBER 3035002
+#define SQLITE_SOURCE_ID      "2021-03-17 19:07:21 ea80f3002f4120f5dcee76e8779dfdc88e1e096c5cdd06904c20fd26d50c3827"
 
 /*
 ** CAPI3REF: Run-Time Library Version Numbers
@@ -2116,7 +2129,13 @@ struct sqlite3_mem_methods {
 ** The second parameter is a pointer to an integer into which
 ** is written 0 or 1 to indicate whether triggers are disabled or enabled
 ** following this call.  The second parameter may be a NULL pointer, in
-** which case the trigger setting is not reported back. </dd>
+** which case the trigger setting is not reported back.
+**
+** <p>Originally this option disabled all triggers.  ^(However, since
+** SQLite version 3.35.0, TEMP triggers are still allowed even if
+** this option is off.  So, in other words, this option now only disables
+** triggers in the main database schema or in the schemas of ATTACH-ed
+** databases.)^ </dd>
 **
 ** [[SQLITE_DBCONFIG_ENABLE_VIEW]]
 ** <dt>SQLITE_DBCONFIG_ENABLE_VIEW</dt>
@@ -2127,7 +2146,13 @@ struct sqlite3_mem_methods {
 ** The second parameter is a pointer to an integer into which
 ** is written 0 or 1 to indicate whether views are disabled or enabled
 ** following this call.  The second parameter may be a NULL pointer, in
-** which case the view setting is not reported back. </dd>
+** which case the view setting is not reported back.
+**
+** <p>Originally this option disabled all views.  ^(However, since
+** SQLite version 3.35.0, TEMP views are still allowed even if
+** this option is off.  So, in other words, this option now only disables
+** views in the main database schema or in the schemas of ATTACH-ed
+** databases.)^ </dd>
 **
 ** [[SQLITE_DBCONFIG_ENABLE_FTS3_TOKENIZER]]
 ** <dt>SQLITE_DBCONFIG_ENABLE_FTS3_TOKENIZER</dt>
@@ -3500,6 +3525,7 @@ SQLITE_API void sqlite3_progress_handler(sqlite3*, int, int(*)(void*), void*);
 **          that uses dot-files in place of posix advisory locking.
 ** <tr><td> file:data.db?mode=readonly <td>
 **          An error. "readonly" is not a valid option for the "mode" parameter.
+**          Use "ro" instead:  "file:data.db?mode=ro".
 ** </table>
 **
 ** ^URI hexadecimal escape sequences (%HH) are supported within the path and
@@ -3698,7 +3724,7 @@ SQLITE_API sqlite3_file *sqlite3_database_file_object(const char*);
 ** If the Y parameter to sqlite3_free_filename(Y) is anything other
 ** than a NULL pointer or a pointer previously acquired from
 ** sqlite3_create_filename(), then bad things such as heap
-** corruption or segfaults may occur. The value Y should be
+** corruption or segfaults may occur. The value Y should not be
 ** used again after sqlite3_free_filename(Y) has been called.  This means
 ** that if the [sqlite3_vfs.xOpen()] method of a VFS has been called using Y,
 ** then the corresponding [sqlite3_module.xClose() method should also be
@@ -7766,7 +7792,8 @@ SQLITE_API int sqlite3_test_control(int op, ...);
 #define SQLITE_TESTCTRL_PRNG_SEED               28
 #define SQLITE_TESTCTRL_EXTRA_SCHEMA_CHECKS     29
 #define SQLITE_TESTCTRL_SEEK_COUNT              30
-#define SQLITE_TESTCTRL_LAST                    30  /* Largest TESTCTRL */
+#define SQLITE_TESTCTRL_TRACEFLAGS              31
+#define SQLITE_TESTCTRL_LAST                    31  /* Largest TESTCTRL */
 
 /*
 ** CAPI3REF: SQL Keyword Checking
@@ -10440,6 +10467,14 @@ SQLITE_API int sqlite3session_patchset(
 SQLITE_API int sqlite3session_isempty(sqlite3_session *pSession);
 
 /*
+** CAPI3REF: Query for the amount of heap memory used by a session object.
+**
+** This API returns the total amount of heap memory in bytes currently
+** used by the session object passed as the only argument.
+*/
+SQLITE_API sqlite3_int64 sqlite3session_memory_used(sqlite3_session *pSession);
+
+/*
 ** CAPI3REF: Create An Iterator To Traverse A Changeset
 ** CONSTRUCTOR: sqlite3_changeset_iter
 **
@@ -10541,18 +10576,23 @@ SQLITE_API int sqlite3changeset_next(sqlite3_changeset_iter *pIter);
 ** call to [sqlite3changeset_next()] must have returned [SQLITE_ROW]. If this
 ** is not the case, this function returns [SQLITE_MISUSE].
 **
-** If argument pzTab is not NULL, then *pzTab is set to point to a
-** nul-terminated utf-8 encoded string containing the name of the table
-** affected by the current change. The buffer remains valid until either
-** sqlite3changeset_next() is called on the iterator or until the
-** conflict-handler function returns. If pnCol is not NULL, then *pnCol is
-** set to the number of columns in the table affected by the change. If
-** pbIndirect is not NULL, then *pbIndirect is set to true (1) if the change
+** Arguments pOp, pnCol and pzTab may not be NULL. Upon return, three
+** outputs are set through these pointers:
+**
+** *pOp is set to one of [SQLITE_INSERT], [SQLITE_DELETE] or [SQLITE_UPDATE],
+** depending on the type of change that the iterator currently points to;
+**
+** *pnCol is set to the number of columns in the table affected by the change; and
+**
+** *pzTab is set to point to a nul-terminated utf-8 encoded string containing
+** the name of the table affected by the current change. The buffer remains
+** valid until either sqlite3changeset_next() is called on the iterator
+** or until the conflict-handler function returns.
+**
+** If pbIndirect is not NULL, then *pbIndirect is set to true (1) if the change
 ** is an indirect change, or false (0) otherwise. See the documentation for
 ** [sqlite3session_indirect()] for a description of direct and indirect
-** changes. Finally, if pOp is not NULL, then *pOp is set to one of
-** [SQLITE_INSERT], [SQLITE_DELETE] or [SQLITE_UPDATE], depending on the
-** type of change that the iterator currently points to.
+** changes.
 **
 ** If no error occurs, SQLITE_OK is returned. If an error does occur, an
 ** SQLite error code is returned. The values of the output variables may not
@@ -12236,10 +12276,12 @@ struct fts5_api {
 #endif /* _FTS5_H */
 
 /******** End of fts5.h *********/
-#else // USE_LIBSQLITE3
- // If users really want to link against the system sqlite3 we
-// need to make this file a noop.
- #endif
+/*** End of #include "sqlite3.h" ***/
+
+
+#ifdef SQLITE_USER_AUTHENTICATION
+/* #include "sqlite3userauth.h" */
+/*** Begin of #include "sqlite3userauth.h" ***/
 /*
 ** 2014-09-08
 **
@@ -12336,3 +12378,194 @@ int sqlite3_user_delete(
 #endif
 
 #endif /* SQLITE_USER_AUTHENTICATION */
+/*** End of #include "sqlite3userauth.h" ***/
+
+#endif
+
+/*
+** Symbols for ciphers
+*/
+#define CODEC_TYPE_UNKNOWN   0
+#define CODEC_TYPE_AES128    1
+#define CODEC_TYPE_AES256    2
+#define CODEC_TYPE_CHACHA20  3
+#define CODEC_TYPE_SQLCIPHER 4
+#define CODEC_TYPE_RC4       5
+#define CODEC_TYPE_MAX       5
+
+/*
+** Definitions of supported ciphers
+*/
+
+/*
+** Compatibility with wxSQLite3
+*/
+#ifdef WXSQLITE3_HAVE_CIPHER_AES_128_CBC
+#define HAVE_CIPHER_AES_128_CBC WXSQLITE3_HAVE_CIPHER_AES_128_CBC
+#endif
+
+#ifdef WXSQLITE3_HAVE_CIPHER_AES_256_CBC
+#define HAVE_CIPHER_AES_256_CBC WXSQLITE3_HAVE_CIPHER_AES_256_CBC
+#endif
+
+#ifdef WXSQLITE3_HAVE_CIPHER_CHACHA20
+#define HAVE_CIPHER_CHACHA20 WXSQLITE3_HAVE_CIPHER_CHACHA20
+#endif
+
+#ifdef WXSQLITE3_HAVE_CIPHER_SQLCIPHER
+#define HAVE_CIPHER_SQLCIPHER WXSQLITE3_HAVE_CIPHER_SQLCIPHER
+#endif
+
+#ifdef WXSQLITE3_HAVE_CIPHER_RC4
+#define HAVE_CIPHER_RC4 WXSQLITE3_HAVE_CIPHER_RC4
+#endif
+
+/*
+** Actual definitions of supported ciphers
+*/
+#ifndef HAVE_CIPHER_AES_128_CBC
+#define HAVE_CIPHER_AES_128_CBC 1
+#endif
+
+#ifndef HAVE_CIPHER_AES_256_CBC
+#define HAVE_CIPHER_AES_256_CBC 1
+#endif
+
+#ifndef HAVE_CIPHER_CHACHA20
+#define HAVE_CIPHER_CHACHA20 1
+#endif
+
+#ifndef HAVE_CIPHER_SQLCIPHER
+#define HAVE_CIPHER_SQLCIPHER 1
+#endif
+
+#ifndef HAVE_CIPHER_RC4
+#define HAVE_CIPHER_RC4 1
+#endif
+
+/*
+** Check that at least one cipher is be supported
+*/
+#if HAVE_CIPHER_AES_128_CBC == 0 &&  \
+    HAVE_CIPHER_AES_256_CBC == 0 &&  \
+    HAVE_CIPHER_CHACHA20    == 0 &&  \
+    HAVE_CIPHER_SQLCIPHER   == 0 &&  \
+    HAVE_CIPHER_RC4         == 0
+#error Enable at least one cipher scheme!
+#endif
+
+/*
+** Definition of API functions
+*/
+
+/*
+** Define Windows specific SQLite API functions (not defined in sqlite3.h)
+*/
+#if SQLITE_OS_WIN == 1
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+SQLITE_API int sqlite3_win32_set_directory(unsigned long type, void* zValue);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+** Specify the key for an encrypted database.
+** This routine should be called right after sqlite3_open().
+**
+** Arguments:
+**   db       - Database to be encrypted
+**   zDbName  - Name of the database (e.g. "main")
+**   pKey     - Passphrase
+**   nKey     - Length of passphrase
+*/
+SQLITE_API int sqlite3_key(sqlite3* db, const void* pKey, int nKey);
+SQLITE_API int sqlite3_key_v2(sqlite3* db, const char* zDbName, const void* pKey, int nKey);
+
+/*
+** Change the key on an open database.
+** If the current database is not encrypted, this routine will encrypt
+** it.  If pNew==0 or nNew==0, the database is decrypted.
+**
+** Arguments:
+**   db       - Database to be encrypted
+**   zDbName  - Name of the database (e.g. "main")
+**   pKey     - Passphrase
+**   nKey     - Length of passphrase
+*/
+SQLITE_API int sqlite3_rekey(sqlite3* db, const void* pKey, int nKey);
+SQLITE_API int sqlite3_rekey_v2(sqlite3* db, const char* zDbName, const void* pKey, int nKey);
+
+/*
+** Specify the activation key for a SEE database.
+** Unless activated, none of the SEE routines will work.
+**
+** Arguments:
+**   zPassPhrase  - Activation phrase
+**
+** Note: Provided only for API compatibility with SEE.
+** Encryption support of SQLite3 Multi Cipher is always enabled.
+*/
+SQLITE_API void sqlite3_activate_see(const char* zPassPhrase);
+
+/*
+** Define functions for the configuration of the wxSQLite3 encryption extension
+*/
+SQLITE_API int sqlite3mc_config(sqlite3* db, const char* paramName, int newValue);
+SQLITE_API int sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramName, int newValue);
+SQLITE_API unsigned char* sqlite3mc_codec_data(sqlite3* db, const char* zDbName, const char* paramName);
+SQLITE_API const char* sqlite3mc_version();
+
+#ifdef SQLITE3MC_WXSQLITE3_COMPATIBLE
+SQLITE_API int wxsqlite3_config(sqlite3* db, const char* paramName, int newValue);
+SQLITE_API int wxsqlite3_config_cipher(sqlite3* db, const char* cipherName, const char* paramName, int newValue);
+SQLITE_API unsigned char* wxsqlite3_codec_data(sqlite3* db, const char* zDbName, const char* paramName);
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
+/*
+** Define public SQLite3 Multiple Ciphers VFS interface
+*/
+/* #include "sqlite3mc_vfs.h" */
+/*** Begin of #include "sqlite3mc_vfs.h" ***/
+/*
+** Name:        sqlite3mc_vfs.h
+** Purpose:     Header file for VFS of SQLite3 Multiple Ciphers support
+** Author:      Ulrich Telle
+** Created:     2020-03-01
+** Copyright:   (c) 2020 Ulrich Telle
+** License:     MIT
+*/
+
+#ifndef SQLITE3MC_VFS_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+SQLITE_API int sqlite3mc_vfs_create(const char* zVfsReal, int makeDefault);
+SQLITE_API void sqlite3mc_vfs_destroy(const char* zName);
+SQLITE_API void sqlite3mc_vfs_shutdown();
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SQLITE3MC_VFS_H_ */
+/*** End of #include "sqlite3mc_vfs.h" ***/
+
+
+#endif
